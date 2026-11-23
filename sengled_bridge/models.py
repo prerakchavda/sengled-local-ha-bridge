@@ -15,10 +15,11 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 
 class RadioProtocol(str, Enum):
-    """Underlying radio and control protocol used by a Sengled device."""
+    """Underlying radio and control protocol used by a Sengled or Amazon Basics device."""
 
     WIFI_MQTT_UDP = "wifi_mqtt_udp"
     WIFI_MATTER = "wifi_matter"
+    WIFI_ALEXA_ACK = "wifi_alexa_ack"
     BLE_SIG_MESH = "ble_sig_mesh"
     BLE_GATT_AUDIO = "ble_gatt_audio"
     ZIGBEE = "zigbee_out_of_scope"
@@ -36,7 +37,7 @@ class ColorCapability(str, Enum):
 
 @dataclass(frozen=True)
 class SengledModuleSpec:
-    """Radio module specification from FCC / IC certification filings (Grantee 2AGN8)."""
+    """Radio module specification from FCC / IC certification filings (Grantee 2AGN8 / 2AC7Z)."""
 
     module_id: str
     fcc_id: str
@@ -71,7 +72,7 @@ class SengledModelSpec:
 
 
 # ---------------------------------------------------------------------------
-# Sengled Radio Modules (FCC Grantee Code: 2AGN8 / IC: 20888)
+# Sengled & Amazon ACK Radio Modules (FCC Grantee Code: 2AGN8 / 2AC7Z)
 # ---------------------------------------------------------------------------
 RADIO_MODULES: Dict[str, SengledModuleSpec] = {
     "WF861": SengledModuleSpec(
@@ -196,6 +197,20 @@ RADIO_MODULES: Dict[str, SengledModuleSpec] = {
         supports_custom_firmware=False,
         custom_firmware_notes="Bluetooth SIG Mesh / Broadcast mesh lighting module.",
         cert_year=2025,
+    ),
+    "ACK_ESP32": SengledModuleSpec(
+        module_id="ACK_ESP32",
+        fcc_id="2AC7Z-ESP32PICOV30",
+        ic_id="21098-ESP32PICOV30",
+        chipset="Espressif ESP32-PICO-V3-ZERO / ESP32-C3 (Alexa Connect Kit)",
+        protocol=RadioProtocol.WIFI_ALEXA_ACK,
+        supports_custom_firmware=True,
+        custom_firmware_notes=(
+            "Amazon Alexa Connect Kit (ACK) module with mTLS to AWS IoT. "
+            "Can be integrated via Alexa Media Player (no hardware mod) or serial-flashed "
+            "over 3.3V UART to ESPHome/Tasmota when GPIO0/GPIO9 boot pad is accessible."
+        ),
+        cert_year=2021,
     ),
 }
 
@@ -470,8 +485,72 @@ MODEL_CATALOG: Tuple[SengledModelSpec, ...] = (
         min_kelvin=2000,
         max_kelvin=6500,
         lumens=800,
-        aliases=("W41-U13A", "W41-U33A"),
-        notes="Supports native local Matter commissioning in Home Assistant.",
+        aliases=("W41-N15", "W41-U13A", "W41-U33A"),
+        notes="Supports 100% native local Matter commissioning in Home Assistant (no bridge required).",
+    ),
+    # --- Amazon Basics Matter-over-Wi-Fi & Alexa Connect Kit (ACK) Devices ---
+    SengledModelSpec(
+        model="AB-MATTER-A19",
+        name="Amazon Basics Matter-over-Wi-Fi Multicolor & Soft White A19/A60 Bulb",
+        fcc_ids=("2AC7Z-ESP32PICOV30",),
+        module_id="ACK_ESP32",
+        chipset="ESP32-C3 / ESP32-PICO Matter 1.3 Wi-Fi SoC",
+        protocol=RadioProtocol.WIFI_MATTER,
+        capability=ColorCapability.RGBW,
+        form_factor="A19/A60",
+        min_kelvin=2000,
+        max_kelvin=6500,
+        lumens=800,
+        aliases=("AMAZON-BASICS-MATTER-A19", "AB-MATTER-A60"),
+        notes="Matter 1.3 certified! Commissions 100% locally into Home Assistant via MT: QR code or 11-digit pairing code.",
+    ),
+    SengledModelSpec(
+        model="AB-MATTER-PLUG",
+        name="Amazon Basics Matter Smart Indoor Plug (Single Outlet)",
+        fcc_ids=("2AC7Z-ESP32PICOV30",),
+        module_id="ACK_ESP32",
+        chipset="ESP32-C3 Matter Wi-Fi SoC",
+        protocol=RadioProtocol.WIFI_MATTER,
+        capability=ColorCapability.ON_OFF,
+        form_factor="Smart Plug",
+        lumens=None,
+        aliases=("AMAZON-BASICS-MATTER-PLUG",),
+        notes="Matter-certified 2.4 GHz Wi-Fi plug; commissions directly into Home Assistant Matter Server.",
+    ),
+    SengledModelSpec(
+        model="13ASB-A800ST-Q1T",
+        name="Amazon Basics Smart A19/BR30 LED Bulb (Works with Alexa Only / Non-Matter ACK)",
+        fcc_ids=("2AC7Z-ESP32PICOV30",),
+        module_id="ACK_ESP32",
+        chipset="Espressif ESP32-PICO-V3-ZERO / ESP32-C3 / BK7231N (Alexa Connect Kit)",
+        protocol=RadioProtocol.WIFI_ALEXA_ACK,
+        capability=ColorCapability.RGBW,
+        form_factor="A19/BR30",
+        min_kelvin=2700,
+        max_kelvin=6500,
+        lumens=800,
+        supports_ota_tasmota_esphome=True,
+        aliases=("B0C332SMK8", "B0C3349GNR", "B0CYPQM746", "B0C333MTB5", "13ASB-A806ST-Q1T"),
+        notes=(
+            "Non-Matter 'Works with Alexa Only' bulb using Amazon ACK mTLS to AWS IoT. "
+            "Control in HA via Alexa Media Player (no disassembly) or 3.3V UART serial flash to ESPHome/Tasmota."
+        ),
+    ),
+    SengledModelSpec(
+        model="WP52-2",
+        name="Amazon Basics Smart Switch / Dimmer / Dual Plug (Works with Alexa Only / ACK)",
+        fcc_ids=("2AC7Z-ESP32PICOV30",),
+        module_id="ACK_ESP32",
+        chipset="Espressif ESP32-PICO-V3-ZERO + Coprocessor (Alexa Connect Kit)",
+        protocol=RadioProtocol.WIFI_ALEXA_ACK,
+        capability=ColorCapability.ON_OFF,
+        form_factor="Wall Switch / Plug",
+        lumens=None,
+        aliases=("B0CW5D561J", "B0CPY295K7"),
+        notes=(
+            "Non-Matter 'Works with Alexa Only' switch/dimmer/plug. Integrate via Alexa Media Player "
+            "or UART serial flash on single-MCU variants."
+        ),
     ),
     # --- Bluetooth (BLE SIG Mesh) B11 / B12 / B16 / B1F / B1G / B1K / B21 Series ---
     SengledModelSpec(

@@ -94,7 +94,11 @@ sengled-bridge udp --ip 192.168.1.145 --color 255 64 0
 # 5. Scan and fingerprint nearby Sengled BLE bulbs
 sengled-bridge ble-scan --timeout 8
 
-# 6. Run the bridge daemon
+# 6. Decode a Matter QR code (MT:...) or classify an Amazon Basics Matter vs. Alexa-Only (ACK) device
+sengled-bridge matter --code "MT:Y.K9042C00KA0648G00"
+sengled-bridge matter --code "13aSB-A800ST-Q1T"
+
+# 7. Run the bridge daemon
 sengled-bridge serve --advertise-ip 192.168.1.100 --http-port 8080 --mqtt-host 127.0.0.1
 ```
 
@@ -102,9 +106,10 @@ sengled-bridge serve --advertise-ip 192.168.1.100 --http-port 8080 --mqtt-host 1
 
 ## Documentation
 
-- [**Supported Models & FCC ID Catalog (`2AGN8-*`)**](docs/MODELS_AND_FCC_IDS.md)
+- [**Supported Models & FCC ID Catalog (`2AGN8-*` & `2AC7Z-*`)**](docs/MODELS_AND_FCC_IDS.md)
 - [**Wi-Fi & BLE Protocol Reverse Engineering Reference**](docs/PROTOCOL_REVERSE_ENGINEERING.md)
 - [**Bulb Reset, Onboarding & Pi-hole/AdGuard DNS Hijack Guide**](docs/ONBOARDING_AND_DNS.md)
+- [**Amazon Basics & Sengled Matter vs. "Works with Alexa Only" (ACK) Guide**](docs/AMAZON_BASICS_AND_MATTER.md)
 
 ---
 

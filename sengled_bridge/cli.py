@@ -293,7 +293,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_ble.add_argument("--timeout", type=float, default=8.0, help="Scan duration in seconds")
     p_ble.set_defaults(func=_cmd_ble_scan)
 
-    # 6. serve
+    # 6. matter
+    p_matter = sub.add_parser(
+        "matter",
+        help="Decode Matter QR (MT:...) or 11/21-digit codes & classify Amazon Basics / Sengled Matter vs ACK devices",
+    )
+    p_matter.add_argument(
+        "--code",
+        required=True,
+        help="Matter QR string (MT:...), 11/21-digit pairing code, or Amazon Basics barcode/model",
+    )
+    p_matter.set_defaults(func=_cmd_matter)
+
+    # 7. serve
     p_serve = sub.add_parser("serve", help="Run the local HTTP config server + HA MQTT Discovery bridge")
     p_serve.add_argument("--advertise-ip", default="127.0.0.1", help="LAN IP returned to bulbs in /bimqtt")
     p_serve.add_argument("--http-port", type=int, default=8080, help="HTTP discovery & Web UI port (default: 8080)")
@@ -312,6 +324,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_serve.set_defaults(func=_cmd_serve)
 
     return parser
+
+
+def _cmd_matter(args: argparse.Namespace) -> int:
+    from sengled_bridge.matter_helper import classify_and_decode_smart_bulb_code
+
+    info = classify_and_decode_smart_bulb_code(args.code)
+    print(json.dumps(info, indent=2))
+    return 0
 
 
 def main(argv: Optional[List[str]] = None) -> int:

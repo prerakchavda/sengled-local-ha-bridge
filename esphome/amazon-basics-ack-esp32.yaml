@@ -1,0 +1,65 @@
+# ESPHome Configuration for Serial-Flashed Amazon Basics ACK Bulbs / Switches
+#
+# Target Hardware:
+#   - Amazon Basics "Works with Alexa Only" A19/BR30 Smart Bulb (13aSB-A800ST-Q1T / B0C332SMK8)
+#   - Amazon Basics Single-Pole Smart Switch (ESP32-PICO-V3-ZERO / 2AC7Z-ESP32PICOV30)
+#
+# NOTE: Must be flashed initial time over 3.3V UART serial (TX, RX, GND, 3.3V, and GPIO0 to GND
+# on power-up) because stock Amazon ACK firmware enforces AWS IoT mTLS and signed OTA images.
+
+esphome:
+  name: amazon-basics-local
+  friendly_name: Amazon Basics Local Device
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+
+api:
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+# Default RGBWW LEDC PWM outputs for ESP32-PICO-V3-ZERO / ESP32-C3 ACK Smart Bulb
+# (Adjust GPIO numbers if your board revision uses an I2C/SM2135E or BP5758D LED driver)
+output:
+  - platform: ledc
+    id: out_red
+    pin: GPIO4
+    frequency: 1000 Hz
+  - platform: ledc
+    id: out_green
+    pin: GPIO5
+    frequency: 1000 Hz
+  - platform: ledc
+    id: out_blue
+    pin: GPIO18
+    frequency: 1000 Hz
+  - platform: ledc
+    id: out_warm_white
+    pin: GPIO19
+    frequency: 1000 Hz
+  - platform: ledc
+    id: out_cool_white
+    pin: GPIO21
+    frequency: 1000 Hz
+
+light:
+  - platform: rgbww
+    name: "Amazon Basics Smart Bulb"
+    red: out_red
+    green: out_green
+    blue: out_blue
+    warm_white: out_warm_white
+    cool_white: out_cool_white
+    warm_white_color_temperature: 2700 K
+    cool_white_color_temperature: 6500 K
+    color_interlock: true
+    restore_mode: ALWAYS_ON
