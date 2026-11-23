@@ -519,26 +519,61 @@ MODEL_CATALOG: Tuple[SengledModelSpec, ...] = (
     ),
     SengledModelSpec(
         model="13ASB-A800ST-Q1T",
-        name="Amazon Basics Smart A19/BR30 LED Bulb (Works with Alexa Only / Non-Matter ACK)",
+        name="Amazon Basics Smart A19/BR30 Multicolor LED Bulb (Works with Alexa Only / Non-Matter ACK)",
         fcc_ids=("2AC7Z-ESP32PICOV30",),
         module_id="ACK_ESP32",
-        chipset="Espressif ESP32-PICO-V3-ZERO / ESP32-C3 / BK7231N (Alexa Connect Kit)",
+        chipset="Espressif ESP32-PICO-V3-ZERO (ESP-IDF v4.3.2 / Alexa Connect Kit)",
         protocol=RadioProtocol.WIFI_ALEXA_ACK,
         capability=ColorCapability.RGBW,
         form_factor="A19/BR30",
-        min_kelvin=2700,
-        max_kelvin=6500,
+        min_kelvin=2200,
+        max_kelvin=7000,
         lumens=800,
         supports_ota_tasmota_esphome=True,
-        aliases=("B0C332SMK8", "B0C3349GNR", "B0CYPQM746", "B0C333MTB5", "13ASB-A806ST-Q1T"),
+        aliases=(
+            "B0C332SMK8",
+            "B0CG5VDC8P",
+            "B0CYPQM746",
+            "B0C333MTB5",
+            "13ASB-A806ST-Q1T",
+            "13ASB-A806ST-Q1T-EU",
+            "13ASB-A806ST-Q1T-EU-2P",
+            "13ASB-A806ST-Q1T-JP",
+        ),
         notes=(
-            "Non-Matter 'Works with Alexa Only' bulb using Amazon ACK mTLS to AWS IoT. "
-            "Control in HA via Alexa Media Player (no disassembly) or 3.3V UART serial flash to ESPHome/Tasmota."
+            "Non-Matter 'Works with Alexa Only' RGBCW bulb using Amazon ACK on ESP32-PICO-V3-ZERO. "
+            "Supported directly in sengled-local-ha-bridge via (1) Direct Alexa GraphQL/Behaviors Bridge, "
+            "(2) Local LAN Hue V1 Echo Emulator, (3) HA Alexa MQTT Command Relay, or "
+            "(4) 3.3V UART serial flash to ESPHome (esphome/amazon-basics-ack-esp32.yaml & amazon-basics-sengled-compat.yaml)."
+        ),
+    ),
+    SengledModelSpec(
+        model="13ASB-A806ST-Q1R",
+        name="Amazon Basics Smart A19/BR30 Soft White Dimmable LED Bulb (Works with Alexa Only / ACK)",
+        fcc_ids=("2AC7Z-ESP32PICOV30",),
+        module_id="ACK_ESP32",
+        chipset="Espressif ESP32-PICO-V3-ZERO (ESP-IDF v4.3.2 / Alexa Connect Kit)",
+        protocol=RadioProtocol.WIFI_ALEXA_ACK,
+        capability=ColorCapability.DIMMABLE_WHITE,
+        form_factor="A19/A60/BR30",
+        min_kelvin=2700,
+        max_kelvin=2700,
+        lumens=800,
+        supports_ota_tasmota_esphome=True,
+        aliases=(
+            "13ASB-A806ST-Q1R-NA",
+            "13ASB-A806ST-Q1R-NA-4P",
+            "13ASB-A806ST-Q1R-EU",
+            "B0C3349GNR",
+        ),
+        notes=(
+            "Non-Matter 'Works with Alexa Only' 2700K Soft White dimmable bulb using Amazon ACK on ESP32-PICO-V3-ZERO. "
+            "Works directly with sengled-local-ha-bridge via Alexa ACK Bridge, Local Hue V1 Echo Emulator, or UART ESPHome flash."
         ),
     ),
     SengledModelSpec(
         model="WP52-2",
-        name="Amazon Basics Smart Switch / Dimmer / Dual Plug (Works with Alexa Only / ACK)",
+        name="Amazon Basics Smart Switch / Dimmer / Plug (Works with Alexa Only / ACK)",
         fcc_ids=("2AC7Z-ESP32PICOV30",),
         module_id="ACK_ESP32",
         chipset="Espressif ESP32-PICO-V3-ZERO + Coprocessor (Alexa Connect Kit)",
@@ -546,10 +581,10 @@ MODEL_CATALOG: Tuple[SengledModelSpec, ...] = (
         capability=ColorCapability.ON_OFF,
         form_factor="Wall Switch / Plug",
         lumens=None,
-        aliases=("B0CW5D561J", "B0CPY295K7"),
+        aliases=("WS30-01", "B0CW5D561J", "B0CPY295K7", "B0CRKTC31J", "B0CMXR538P", "B0CMXRGBNH"),
         notes=(
-            "Non-Matter 'Works with Alexa Only' switch/dimmer/plug. Integrate via Alexa Media Player "
-            "or UART serial flash on single-MCU variants."
+            "Non-Matter 'Works with Alexa Only' switch/dimmer/plug. Supported in sengled-local-ha-bridge "
+            "via Alexa ACK Bridge, Local Hue V1 Echo Emulator, or UART serial flash on single-MCU variants."
         ),
     ),
     # --- Bluetooth (BLE SIG Mesh) B11 / B12 / B16 / B1F / B1G / B1K / B21 Series ---
@@ -794,6 +829,7 @@ SENGLED_MAC_OUIS: Dict[str, str] = {
     "F4:CF:A2": "Sengled / Espressif Systems",
     "EC:21:E5": "Sengled / Telink BLE Mesh",
     "A4:C1:38": "Telink Semiconductor (Sengled BLE Mesh BT001/BT002)",
+    "F0:F0:A4": "Amazon Technologies Inc. (Amazon Basics ACK / Echo)",
 }
 
 # Telink Semiconductor Bluetooth SIG Company Identifier (advertised in Manufacturer Specific Data)
@@ -964,6 +1000,22 @@ def evaluate_esphome_tasmota_vs_stock(type_code: str, identify_no: str = "") -> 
     """
     specs = identify_device_by_model_or_fcc(type_code) if type_code else []
     spec = specs[0] if specs else None
+    if spec is not None and spec.protocol == RadioProtocol.WIFI_ALEXA_ACK:
+        return {
+            "can_flash_esphome_tasmota": True,
+            "module": "2AC7Z-ESP32PICOV30 (Espressif ESP32-PICO-V3-ZERO / Alexa Connect Kit)",
+            "recommendation": "amazon_ack_multi_path",
+            "summary": (
+                "Amazon 'Works with Alexa Only' (ACK) devices run ESP-IDF v4.3.2 on an ESP32-PICO-V3-ZERO "
+                "with AWS IoT mTLS. All 4 integration paths work with sengled-local-ha-bridge: "
+                "(1) Direct Alexa Smart Home GraphQL/Behaviors Bridge (`--alexa-cookie` / `--ack-light`), "
+                "(2) Built-in 100% Local LAN Philips Hue V1 Echo Emulator (`/description.xml` & `/api/.../lights`), "
+                "(3) Home Assistant `alexa_media` MQTT Command Relay (`sengled_bridge/alexa_ack/{slug}/command`), or "
+                "(4) 3.3V UART serial flash (`GPIO0` to `GND`) using `esphome/amazon-basics-ack-esp32.yaml` "
+                "or `esphome/amazon-basics-sengled-compat.yaml` (speaks native `wifielement/{MAC}/status`)."
+            ),
+        }
+
     is_esp8266 = (
         "ESP8266" in identify_no.upper()
         or (spec is not None and spec.supports_ota_tasmota_esphome)

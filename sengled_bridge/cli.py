@@ -159,6 +159,9 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         discovery_prefix=args.discovery_prefix,
         bridge_prefix=args.bridge_prefix,
         seq_storage_path=Path(args.data_dir) / "ble_mesh_seq.json",
+        alexa_cookie=args.alexa_cookie or "",
+        alexa_domain=args.alexa_domain or "amazon.com",
+        echo_entity_id=args.echo_entity or "media_player.echo_dot",
     )
 
     # Set up MQTT client connected to the HA / unified Mosquitto broker
@@ -196,6 +199,34 @@ def _cmd_serve(args: argparse.Namespace) -> int:
             bridge.register_ble_bulb_in_ha(mac=mac, model=model)
             log.info("Registered BLE bulb %s (%s) in Home Assistant", mac, model)
 
+        # Register any pre-configured Amazon "Works with Alexa Only" (ACK) lights
+        for ack_spec in args.ack_light or []:
+            parts = ack_spec.split(",")
+            identifier = parts[0].strip()
+            model = parts[1].strip() if len(parts) > 1 and parts[1].strip() else "13ASB-A800ST-Q1T"
+            friendly_name = parts[2].strip() if len(parts) > 2 and parts[2].strip() else None
+            endpoint_id = parts[3].strip() if len(parts) > 3 and parts[3].strip() else ""
+            bulb = bridge.register_ack_light_in_ha(
+                identifier=identifier,
+                model=model,
+                friendly_name=friendly_name,
+                endpoint_id=endpoint_id,
+            )
+            log.info(
+                "Registered Amazon 'Works with Alexa Only' light %s (%s, Hue ID %d) in Home Assistant",
+                bulb.mac,
+                bulb.model,
+                bulb.hue_light_id,
+            )
+
+        # If an Alexa session cookie is configured, auto-discover "Works with Alexa Only" lights
+        if args.alexa_cookie:
+            try:
+                discovered = bridge.discover_and_register_alexa_lights()
+                log.info("Auto-discovered %d Alexa Smart Home lights via /nexus/v1/graphql", len(discovered))
+            except Exception as exc:
+                log.warning("Alexa GraphQL auto-discovery failed (%s)", exc)
+
     def _on_message(client: Any, userdata: Any, msg: Any) -> None:
         topic = str(msg.topic)
         if topic.startswith("wifielement/"):
@@ -211,14 +242,18 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         mqtt_tls_port=args.bulb_tls_port,
         http_port=args.http_port,
         status_provider=bridge.get_summary_status,
+        bridge=bridge,
     )
     bound_port = http_server.start()
     log.info(
-        "HTTP Discovery & Web UI listening on http://0.0.0.0:%d (advertising MQTT TLS %s:%d)",
+        "HTTP Discovery, Hue V1 Echo Emulator & Web UI listening on http://0.0.0.0:%d (advertising MQTT TLS %s:%d)",
         bound_port,
         args.advertise_ip,
         args.bulb_tls_port,
     )
+
+    if args.enable_hue_ssdp:
+        bridge.ack_controller.start_ssdp_responder(args.advertise_ip, bound_port)
 
     try:
         mqtt_client.connect(args.mqtt_host, args.mqtt_port, keepalive=60)
@@ -239,6 +274,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         while not stop_event:
             time.sleep(0.5)
     finally:
+        bridge.ack_controller.stop_ssdp_responder()
         bridge.publish_bridge_online(False)
         mqtt_client.loop_stop()
         http_server.stop()
@@ -248,13 +284,13 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="sengled-bridge",
-        description="100% Local Home Assistant Bridge for Sengled Wi-Fi & BLE Smart Bulbs",
+        description="100% Local Home Assistant Bridge for Sengled Wi-Fi, BLE & Amazon 'Works with Alexa Only' Smart Bulbs",
     )
     sub = parser.add_subparsers(dest="subcommand", required=True)
 
     # 1. models
-    p_models = sub.add_parser("models", help="List or fingerprint Sengled models and FCC IDs")
-    p_models.add_argument("-q", "--query", help="Model number or FCC ID (e.g. W31-N11, 2AGN8-WF863, B11-N1E)")
+    p_models = sub.add_parser("models", help="List or fingerprint Sengled & Amazon Basics models and FCC IDs")
+    p_models.add_argument("-q", "--query", help="Model number or FCC ID (e.g. W31-N11, 2AGN8-WF863, B11-N1E, 13aSB-A800ST-Q1T)")
     p_models.set_defaults(func=_cmd_models)
 
     # 2. certs
@@ -305,9 +341,29 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_matter.set_defaults(func=_cmd_matter)
 
-    # 7. serve
-    p_serve = sub.add_parser("serve", help="Run the local HTTP config server + HA MQTT Discovery bridge")
-    p_serve.add_argument("--advertise-ip", default="127.0.0.1", help="LAN IP returned to bulbs in /bimqtt")
+    # 7. alexa-ack
+    p_ack = sub.add_parser(
+        "alexa-ack",
+        help="Discover, parse FFS barcodes, or control Amazon 'Works with Alexa Only' (ACK & Echo-paired) lights",
+    )
+    p_ack.add_argument("--barcode", help="Parse an Amazon FFS 2D DataMatrix/QR barcode, DSN, or model (e.g. 13aSB-A800ST-Q1T)")
+    p_ack.add_argument("--discover", action="store_true", help="Discover 'Works with Alexa Only' lights via /nexus/v1/graphql")
+    p_ack.add_argument("--id", help="Light MAC, DSN, or Alexa endpointId to control")
+    p_ack.add_argument("--name", default="Amazon Alexa Light", help="Friendly name for voice command synthesis")
+    p_ack.add_argument("--model", default="13ASB-A800ST-Q1T", help="Model code (default: 13ASB-A800ST-Q1T)")
+    p_ack.add_argument("--cookie", default="", help="Optional Amazon Alexa session cookie for live GraphQL/Behaviors calls")
+    p_ack.add_argument("--domain", default="amazon.com", help="Amazon domain (default: amazon.com)")
+    p_ack.add_argument("--echo-entity", default="media_player.echo_dot", help="HA Echo media_player entity ID")
+    p_ack.add_argument("--on", action="store_true", help="Turn light ON")
+    p_ack.add_argument("--off", action="store_true", help="Turn light OFF")
+    p_ack.add_argument("--brightness", type=int, help="Set brightness 0..255")
+    p_ack.add_argument("--colortemp", type=int, help="Set color temperature in Kelvin (2000..7000)")
+    p_ack.add_argument("--color", nargs=3, type=int, metavar=("R", "G", "B"), help="Set RGB color 0..255 (mapped to nearest Alexa colorName)")
+    p_ack.set_defaults(func=_cmd_alexa_ack)
+
+    # 8. serve
+    p_serve = sub.add_parser("serve", help="Run the local HTTP config server + Hue V1 Echo Emulator + HA MQTT Discovery bridge")
+    p_serve.add_argument("--advertise-ip", default="127.0.0.1", help="LAN IP returned to bulbs in /bimqtt and /description.xml")
     p_serve.add_argument("--http-port", type=int, default=8080, help="HTTP discovery & Web UI port (default: 8080)")
     p_serve.add_argument("--bulb-tls-port", type=int, default=8883, help="TLS MQTT port returned in /bimqtt (default: 8883)")
     p_serve.add_argument("--mqtt-host", default="127.0.0.1", help="Home Assistant / local MQTT broker host")
@@ -320,6 +376,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_serve.add_argument("--data-dir", default="./data", help="Directory for persistent state & BLE mesh seq floor")
     p_serve.add_argument("--auto-certs", action="store_true", default=True, help="Auto-generate TLS certs on startup")
     p_serve.add_argument("--ble-bulb", action="append", help="Register BLE bulb as MAC,MODEL (e.g. EC:21:E5:11:22:33,B11-N1E)")
+    p_serve.add_argument(
+        "--ack-light",
+        action="append",
+        help="Register Amazon 'Works with Alexa Only' light as ID[,MODEL[,NAME[,ENDPOINT_ID]]] (e.g. G09123456789ABCD,13ASB-A800ST-Q1T,Desk Lamp)",
+    )
+    p_serve.add_argument("--alexa-cookie", default="", help="Optional Amazon session cookie for direct Alexa GraphQL discovery & control")
+    p_serve.add_argument("--alexa-domain", default="amazon.com", help="Amazon domain for Alexa GraphQL API (default: amazon.com)")
+    p_serve.add_argument("--echo-entity", default="media_player.echo_dot", help="HA Echo media_player entity ID for MQTT voice relay")
+    p_serve.add_argument("--enable-hue-ssdp", action="store_true", help="Enable UDP port 1900 SSDP responder for Local Hue V1 Echo Emulation")
     p_serve.add_argument("--log-level", default="info", help="Logging level (debug, info, warning, error)")
     p_serve.set_defaults(func=_cmd_serve)
 
@@ -334,6 +399,54 @@ def _cmd_matter(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_alexa_ack(args: argparse.Namespace) -> int:
+    from sengled_bridge.alexa_ack_bridge import (
+        AlexaACKController,
+        parse_amazon_ack_ffs_barcode,
+    )
+
+    if args.barcode:
+        info = parse_amazon_ack_ffs_barcode(args.barcode)
+        print(json.dumps(info, indent=2))
+        return 0
+
+    ctrl = AlexaACKController(
+        alexa_cookie=args.cookie,
+        alexa_domain=args.domain,
+        echo_entity_id=args.echo_entity,
+    )
+
+    if args.discover:
+        bulbs = ctrl.discover_from_alexa_graphql()
+        print(
+            json.dumps(
+                {"discovered_count": len(bulbs), "lights": [asdict(b) for b in bulbs]},
+                indent=2,
+            )
+        )
+        return 0
+
+    target_id = args.id or "13ASB-A800ST-Q1T"
+    bulb = ctrl.register_bulb(
+        identifier=target_id,
+        model=args.model,
+        name=args.name,
+        endpoint_id=target_id if target_id.startswith("amzn1.") else "",
+    )
+    cmd_dict: dict[str, Any] = {"state": "OFF" if args.off else "ON"}
+    if args.brightness is not None:
+        cmd_dict["brightness"] = int(args.brightness)
+    if args.colortemp is not None:
+        cmd_dict["color_temp_kelvin"] = int(args.colortemp)
+    if args.color is not None:
+        r, g, b = args.color
+        cmd_dict["color"] = {"r": r, "g": g, "b": b}
+
+    result = ctrl.dispatch_ha_command(bulb.mac, cmd_dict)
+    print(json.dumps(result, indent=2))
+    return 0
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -342,3 +455,4 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+

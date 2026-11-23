@@ -337,18 +337,25 @@ def classify_and_decode_smart_bulb_code(code_or_barcode: str) -> Dict[str, Any]:
             "ha_service_call": build_ha_matter_commission_request(only_digits),
         }
 
-    # Case 3: Amazon Basics "Works with Alexa Only" (ACK) barcode or model string
+    # Case 3: Amazon Basics / Sengled "Works with Alexa Only" (ACK / FFS) barcode or model string
+    from sengled_bridge.alexa_ack_bridge import parse_amazon_ack_ffs_barcode
+
+    ack_info = parse_amazon_ack_ffs_barcode(raw)
     return {
         "classification": "amazon_ack_alexa_only",
         "is_matter": False,
         "raw_input": raw,
         "summary": (
             "Non-Matter Amazon Alexa Connect Kit (ACK / Frustration-Free Setup) device. "
-            "Uses mTLS to AWS IoT on an ESP32-PICO-V3-ZERO or BK7231N module."
+            "Uses mTLS to AWS IoT on an ESP32-PICO-V3-ZERO (FCC ID: 2AC7Z-ESP32PICOV30) module "
+            "and is supported directly by sengled-local-ha-bridge across 4 integration paths."
         ),
+        "ack_device_info": ack_info,
         "recommended_paths": [
-            "No-Hardware-Mod: Pair in Alexa App and expose to Home Assistant via Alexa Media Player (HACS).",
-            "100% Local Hardware Mod: Flash ESPHome or Tasmota (with local Matter) via 3.3V UART serial pads (see esphome/amazon-basics-ack-esp32.yaml).",
+            "Path 1 (Direct Alexa GraphQL/Behaviors Bridge in sengled-local-ha-bridge): Pass --alexa-cookie or --ack-light to sengled-bridge serve to expose as a native HA MQTT light.",
+            "Path 2 (100% Local LAN Echo / Philips Hue V1 Emulator in sengled-local-ha-bridge): Sync state locally with your Echo via /description.xml & /api/<user>/lights/<id>.",
+            "Path 3 (HA Alexa Media / Voice Command MQTT Relay): Forward sengled_bridge/alexa_ack/{slug}/command to media_player.play_media (Alexa Media Player).",
+            "Path 4 (100% Local Hardware Mod): Flash ESPHome via 3.3V UART serial pads (esphome/amazon-basics-ack-esp32.yaml or esphome/amazon-basics-sengled-compat.yaml).",
         ],
     }
 

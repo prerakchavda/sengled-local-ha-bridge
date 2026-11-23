@@ -26,6 +26,10 @@ dev = [
 [project.scripts]
 sengled-bridge = "sengled_bridge.cli:main"
 
+[tool.setuptools.packages.find]
+include = ["sengled_bridge*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+

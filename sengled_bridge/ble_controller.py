@@ -583,6 +583,59 @@ class SengledBLEController:
                 self.on_state_change(bulb)
         return status
 
+    def build_proxy_init_handshake_pdus(self) -> List[bytes]:
+        """
+        Build the mandatory initialization Proxy PDUs sent upon connecting to GATT `0x1828`:
+          1. `ProxyConfigSetFilterType(EXCLUSION_LIST_FILTER = 0x01)` on `PROXY_PDU_PROXY_CONFIG`
+             so the bulb proxy forwards status notifications on `0x2ADE`.
+          2. `GenericOnOffGet` (`0x8201`) on `PROXY_PDU_NETWORK` to synchronize initial state.
+        """
+        filter_pdu = encode_proxy_pdu(
+            PROXY_PDU_PROXY_CONFIG, build_proxy_filter_exclusion_list_message()
+        )
+        onoff_get_pdu = encode_proxy_pdu(PROXY_PDU_NETWORK, build_generic_onoff_get())
+        return [filter_pdu, onoff_get_pdu]
+
+    async def execute_proxy_pdus_gatt(
+        self,
+        mac: str,
+        pdus: List[bytes],
+        timeout_s: float = 10.0,
+    ) -> Dict[str, Any]:
+        """
+        Connect to a Sengled 'Works with Alexa Only' Bluetooth Mesh bulb (`B11-*`, `B12-*`,
+        `B1F-*`, `B21-*`) over GATT Service `0x1828`, enable notifications on `0x2ADE`,
+        initialize the Proxy Exclusion List filter, and write `pdus` to `0x2ADD`.
+        """
+        try:
+            from bleak import BleakClient
+        except ImportError as exc:
+            raise RuntimeError("bleak is not installed; install with `pip install bleak`.") from exc
+
+        norm_mac = normalize_mac(mac)
+        bulb = self.register_bulb(norm_mac)
+        notifications: List[Dict[str, Any]] = []
+
+        def _on_notify(_sender: Any, data: bytearray) -> None:
+            parsed = self.handle_incoming_proxy_notification(norm_mac, bytes(data))
+            if parsed:
+                notifications.append(parsed)
+
+        async with BleakClient(norm_mac, timeout=timeout_s) as client:
+            bulb.connected = True
+            await client.start_notify(BLE_MESH_PROXY_DATA_OUT_UUID, _on_notify)
+            # Send mandatory EXCLUSION_LIST_FILTER initialization
+            for init_pdu in self.build_proxy_init_handshake_pdus():
+                await client.write_gatt_char(BLE_MESH_PROXY_DATA_IN_UUID, init_pdu, response=False)
+            for cmd_pdu in pdus:
+                await client.write_gatt_char(BLE_MESH_PROXY_DATA_IN_UUID, cmd_pdu, response=False)
+
+        return {
+            "mac": norm_mac,
+            "written_pdus_hex": [p.hex() for p in pdus],
+            "notifications_received": notifications,
+        }
+
     async def scan_sengled_ble_devices(self, timeout_s: float = 8.0) -> List[Dict[str, Any]]:
         """
         Run a live BLE scan using `bleak` (if installed and a Bluetooth adapter
@@ -612,3 +665,4 @@ class SengledBLEController:
                     }
                 )
         return results
+

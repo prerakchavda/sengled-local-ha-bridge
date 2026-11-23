@@ -145,8 +145,27 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <pre id="provOut">Connect to Sengled_Wi-Fi Bulb_XXXX AP first, then click Provision.</pre>
       </div>
     </div>
+    <div class="card" style="margin-bottom: 20px;">
+      <h2>3. Amazon "Works with Alexa Only" (ACK) &amp; Matter Light Bridge</h2>
+      <div class="grid">
+        <div>
+          <label>Decode Matter QR (MT:...) or Amazon ACK Barcode / Model (e.g. 13aSB-A800ST-Q1T)</label>
+          <input id="ackCode" placeholder="13aSB-A800ST-Q1T or MT:Y.K9042C00KA0648G00" />
+          <button onclick="decodeAckOrMatter()">Classify &amp; Decode Barcode</button>
+        </div>
+        <div>
+          <label>Register "Works with Alexa Only" Light in Bridge (DSN / MAC / Endpoint ID)</label>
+          <input id="ackId" placeholder="G09123456789ABCD or F0:F0:A4:11:22:33" />
+          <label>Model &amp; Friendly Name</label>
+          <input id="ackModel" value="13ASB-A800ST-Q1T" placeholder="13ASB-A800ST-Q1T" />
+          <input id="ackName" placeholder="Living Room Alexa Bulb" />
+          <button onclick="registerAckLight()">Register Alexa-Only Light in HA</button>
+        </div>
+      </div>
+      <pre id="ackOut">Decode or register any "Works with Alexa Only" light above to expose it to Home Assistant.</pre>
+    </div>
     <div class="card">
-      <h2>3. Bridge & Discovery Endpoint Status</h2>
+      <h2>4. Bridge &amp; Discovery Endpoint Status</h2>
       <button onclick="refreshStatus()">Refresh Status</button>
       <button onclick="scanLanUdp()">Scan LAN via UDP (Port 9080)</button>
       <pre id="statusOut">Loading status...</pre>
@@ -172,6 +191,31 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       });
       const data = await res.json();
       document.getElementById('provOut').textContent = JSON.stringify(data, null, 2);
+    }
+    async function decodeAckOrMatter() {
+      const code = document.getElementById('ackCode').value.trim();
+      const res = await fetch('/api/ack/decode-barcode', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({code})
+      });
+      const data = await res.json();
+      document.getElementById('ackOut').textContent = JSON.stringify(data, null, 2);
+    }
+    async function registerAckLight() {
+      const payload = {
+        identifier: document.getElementById('ackId').value.trim() || '13ASB-A800ST-Q1T',
+        model: document.getElementById('ackModel').value.trim() || '13ASB-A800ST-Q1T',
+        name: document.getElementById('ackName').value.trim() || 'Amazon Alexa Light'
+      };
+      const res = await fetch('/api/ack/register', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      document.getElementById('ackOut').textContent = JSON.stringify(data, null, 2);
+      refreshStatus();
     }
     async function refreshStatus() {
       const res = await fetch('/status');
@@ -207,8 +251,11 @@ class FastHTTPServer(HTTPServer):
 
 class SengledDiscoveryHTTPServer:
     """
-    Embedded HTTP server handling Sengled Wi-Fi bulb cloud simulation endpoints
-    and the local web dashboard.
+    Embedded HTTP server handling:
+    - Sengled Wi-Fi bulb cloud simulation endpoints (`/life2/device/accessCloud.json`, `/jbalancer/new/bimqtt`)
+    - Local LAN Philips Hue V1 Echo Emulator (`/description.xml`, `/api/<user>/lights`, `PUT /api/<user>/lights/<id>/state`)
+    - Amazon "Works with Alexa Only" (ACK) registration, discovery, and control endpoints (`/api/ack/...`)
+    - Local Web Provisioning & Diagnostic UI (`/`)
     """
 
     def __init__(
@@ -218,15 +265,18 @@ class SengledDiscoveryHTTPServer:
         http_port: int = 8080,
         bind_address: str = "0.0.0.0",
         status_provider: Optional[Callable[[], Dict[str, Any]]] = None,
+        bridge: Optional[Any] = None,
     ):
         self.mqtt_host = mqtt_host
         self.mqtt_tls_port = int(mqtt_tls_port)
         self.http_port = int(http_port)
         self.bind_address = bind_address
         self.status_provider = status_provider
+        self.bridge = bridge
 
         self.access_cloud_hits: int = 0
         self.bimqtt_hits: int = 0
+        self.hue_emulator_hits: int = 0
         self.client_ips: List[str] = []
         self.started_at: float = time.time()
 
@@ -238,7 +288,9 @@ class SengledDiscoveryHTTPServer:
             self.client_ips.append(ip)
 
     def get_status_dict(self) -> Dict[str, Any]:
-        extra = self.status_provider() if self.status_provider else {}
+        extra = self.status_provider() if self.status_provider else (
+            self.bridge.get_summary_status() if self.bridge else {}
+        )
         return {
             "service": "sengled-local-ha-bridge",
             "uptime_seconds": round(time.time() - self.started_at, 1),
@@ -247,6 +299,7 @@ class SengledDiscoveryHTTPServer:
             "mqtt_tls_port": self.mqtt_tls_port,
             "access_cloud_hits": self.access_cloud_hits,
             "bimqtt_hits": self.bimqtt_hits,
+            "hue_emulator_hits": self.hue_emulator_hits,
             "recent_bulb_ips": self.client_ips,
             **extra,
         }
@@ -259,6 +312,14 @@ class SengledDiscoveryHTTPServer:
                 body = json.dumps(data).encode("utf-8")
                 self.send_response(status_code)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def _send_xml(self, xml_str: str, status_code: int = 200) -> None:
+                body = xml_str.encode("utf-8")
+                self.send_response(status_code)
+                self.send_header("Content-Type", "application/xml; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
@@ -293,11 +354,56 @@ class SengledDiscoveryHTTPServer:
 
                 return False
 
+            def _handle_hue_v1_get(self, path: str) -> bool:
+                from sengled_bridge.alexa_ack_bridge import (
+                    build_hue_upnp_description_xml,
+                    build_hue_v1_light_entry,
+                )
+
+                if path == "/description.xml":
+                    outer.hue_emulator_hits += 1
+                    self._send_xml(
+                        build_hue_upnp_description_xml(outer.mqtt_host, outer.http_port)
+                    )
+                    return True
+
+                # Match `/api/<username>/lights` or `/api/<username>/lights/<id>`
+                parts = [p for p in path.split("/") if p]
+                if len(parts) >= 2 and parts[0] == "api" and parts[1] not in ("models", "provision", "udp-discover", "ack"):
+                    outer.hue_emulator_hits += 1
+                    ack_ctrl = outer.bridge.ack_controller if outer.bridge else None
+                    lights_map: Dict[str, Any] = {}
+                    if ack_ctrl:
+                        for b in ack_ctrl.bulbs.values():
+                            lights_map[str(b.hue_light_id)] = build_hue_v1_light_entry(b)
+
+                    if len(parts) == 2:
+                        self._send_json({"lights": lights_map, "groups": {}, "scenes": {}})
+                        return True
+                    if len(parts) == 3 and parts[2] == "lights":
+                        self._send_json(lights_map)
+                        return True
+                    if len(parts) == 4 and parts[2] == "lights":
+                        lid = parts[3]
+                        if lid in lights_map:
+                            self._send_json(lights_map[lid])
+                            return True
+                        self._send_json(
+                            [{"error": {"type": 3, "address": f"/lights/{lid}", "description": "resource not available"}}],
+                            status_code=404,
+                        )
+                        return True
+
+                return False
+
             def do_GET(self) -> None:  # noqa: N802
                 parsed = urlparse(self.path)
                 path = parsed.path
 
                 if self._handle_sengled_discovery(path):
+                    return
+
+                if self._handle_hue_v1_get(path):
                     return
 
                 if path == "/health":
@@ -345,6 +451,93 @@ class SengledDiscoveryHTTPServer:
                 if self._handle_sengled_discovery(path):
                     return
 
+                # Philips Hue V1 Echo Pairing endpoint (`POST /api`)
+                if path in ("/api", "/api/"):
+                    outer.hue_emulator_hits += 1
+                    self._send_json([{"success": {"username": "sengledlocalhabridge"}}])
+                    return
+
+                if path == "/api/ack/decode-barcode":
+                    from sengled_bridge.matter_helper import classify_and_decode_smart_bulb_code
+
+                    req = json.loads(raw_body.decode("utf-8") or "{}")
+                    code = str(req.get("code", "")).strip()
+                    self._send_json(classify_and_decode_smart_bulb_code(code))
+                    return
+
+                if path == "/api/ack/register":
+                    if not outer.bridge:
+                        self._send_json({"success": False, "error": "Bridge instance not attached"}, status_code=400)
+                        return
+                    req = json.loads(raw_body.decode("utf-8") or "{}")
+                    identifier = str(req.get("identifier", "") or req.get("dsn", "") or req.get("mac", "")).strip()
+                    if not identifier:
+                        self._send_json({"success": False, "error": "identifier is required"}, status_code=400)
+                        return
+                    model = str(req.get("model", "13ASB-A800ST-Q1T")).strip()
+                    name = str(req.get("name", "")).strip() or None
+                    endpoint_id = str(req.get("endpoint_id", "")).strip()
+                    dsn = str(req.get("dsn", "")).strip()
+                    bulb = outer.bridge.register_ack_light_in_ha(
+                        identifier=identifier,
+                        model=model,
+                        friendly_name=name,
+                        endpoint_id=endpoint_id,
+                        dsn=dsn,
+                    )
+                    self._send_json({"success": True, "light": asdict(bulb)})
+                    return
+
+                if path == "/api/ack/discover":
+                    if not outer.bridge:
+                        self._send_json({"success": False, "error": "Bridge instance not attached"}, status_code=400)
+                        return
+                    try:
+                        req = json.loads(raw_body.decode("utf-8") or "{}")
+                        if req.get("alexa_cookie"):
+                            outer.bridge.ack_controller.configure_alexa_credentials(
+                                alexa_cookie=str(req["alexa_cookie"]),
+                                alexa_domain=str(req.get("alexa_domain", "amazon.com")),
+                                alexa_csrf=str(req.get("alexa_csrf", "")),
+                            )
+                        bulbs = outer.bridge.discover_and_register_alexa_lights()
+                        self._send_json(
+                            {
+                                "success": True,
+                                "discovered_count": len(bulbs),
+                                "lights": [asdict(b) for b in bulbs],
+                            }
+                        )
+                    except Exception as exc:
+                        self._send_json({"success": False, "error": str(exc)}, status_code=400)
+                    return
+
+                if path == "/api/ack/command":
+                    if not outer.bridge:
+                        self._send_json({"success": False, "error": "Bridge instance not attached"}, status_code=400)
+                        return
+                    req = json.loads(raw_body.decode("utf-8") or "{}")
+                    identifier = str(req.get("identifier", "") or req.get("mac", "")).strip()
+                    if not identifier:
+                        self._send_json({"success": False, "error": "identifier is required"}, status_code=400)
+                        return
+                    from sengled_bridge.alexa_ack_bridge import dsn_or_endpoint_to_mac
+                    from sengled_bridge.wifi_protocol import mac_to_slug
+
+                    mac = dsn_or_endpoint_to_mac(identifier)
+                    if mac not in outer.bridge.ack_controller.bulbs:
+                        outer.bridge.register_ack_light_in_ha(identifier=identifier)
+                    slug = mac_to_slug(mac)
+                    cmd_payload = {k: v for k, v in req.items() if k not in ("identifier", "mac")}
+                    if "state" not in cmd_payload:
+                        cmd_payload["state"] = "ON"
+                    res = outer.bridge.handle_ha_command_message(
+                        f"{outer.bridge.bridge_prefix}/light/{slug}/set",
+                        json.dumps(cmd_payload),
+                    )
+                    self._send_json({"success": True, "dispatch": res})
+                    return
+
                 if path == "/api/provision":
                     try:
                         req = json.loads(raw_body.decode("utf-8") or "{}")
@@ -381,9 +574,25 @@ class SengledDiscoveryHTTPServer:
 
             def do_PUT(self) -> None:  # noqa: N802
                 parsed = urlparse(self.path)
-                _ = self._read_body_bytes()
-                if self._handle_sengled_discovery(parsed.path):
+                path = parsed.path
+                raw_body = self._read_body_bytes()
+
+                if self._handle_sengled_discovery(path):
                     return
+
+                # Local LAN Philips Hue V1 state update (`PUT /api/<user>/lights/<id>/state`)
+                parts = [p for p in path.split("/") if p]
+                if len(parts) == 5 and parts[0] == "api" and parts[2] == "lights" and parts[4] == "state":
+                    outer.hue_emulator_hits += 1
+                    if outer.bridge and parts[3].isdigit():
+                        hue_put = json.loads(raw_body.decode("utf-8") or "{}")
+                        ack = outer.bridge.ack_controller.handle_local_hue_state_put(
+                            int(parts[3]), hue_put
+                        )
+                        if ack is not None:
+                            self._send_json(ack)
+                            return
+
                 self._send_json({"error": "Not Found"}, status_code=404)
 
             def log_message(self, format_str: str, *args: Any) -> None:
@@ -408,3 +617,4 @@ class SengledDiscoveryHTTPServer:
             self._server.shutdown()
             self._server.server_close()
             self._server = None
+

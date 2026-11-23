@@ -28,7 +28,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 def normalize_mac(mac: str) -> str:
     """Normalize a MAC address to uppercase colon-separated format `AA:BB:CC:DD:EE:FF`."""
-    cleaned = mac.strip().upper().replace("-", ":").replace(".", "")
+    cleaned = mac.strip().upper().replace("-", ":").replace("_", ":").replace(".", "")
     if ":" not in cleaned and len(cleaned) == 12:
         cleaned = ":".join(cleaned[i : i + 2] for i in range(0, 12, 2))
     return cleaned

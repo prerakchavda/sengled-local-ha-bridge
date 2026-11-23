@@ -1,18 +1,19 @@
-# ESPHome Configuration for Serial-Flashed Amazon Basics ACK Bulbs / Switches
+# ESPHome Configuration for Serial-Flashed Amazon Basics "Works with Alexa Only" (ACK) Bulbs / Switches
 #
 # Target Hardware:
-#   - Amazon Basics "Works with Alexa Only" A19/BR30 Smart Bulb (13aSB-A800ST-Q1T / B0C332SMK8)
-#   - Amazon Basics Single-Pole Smart Switch (ESP32-PICO-V3-ZERO / 2AC7Z-ESP32PICOV30)
+#   - Amazon Basics "Works with Alexa Only" A19/BR30 Multicolor Smart Bulb (13aSB-A800ST-Q1T / 13aSB-A806ST-Q1T / B0C332SMK8 / B0CG5VDC8P)
+#   - Amazon Basics "Works with Alexa Only" A19/BR30 Soft White Dimmable Bulb (13aSB-A806ST-Q1R_NA / B0C3349GNR)
+#   - Amazon Basics Single-Pole Smart Switch / Plug (ESP32-PICO-V3-ZERO / FCC ID: 2AC7Z-ESP32PICOV30)
 #
-# NOTE: Must be flashed initial time over 3.3V UART serial (TX, RX, GND, 3.3V, and GPIO0 to GND
-# on power-up) because stock Amazon ACK firmware enforces AWS IoT mTLS and signed OTA images.
+# NOTE: Must be flashed the initial time over 3.3V UART serial (TXD0, RXD0, GND, 3.3V, and GPIO0 to GND
+# on power-up) because stock Amazon ACK firmware (ESP-IDF v4.3.2) enforces AWS IoT mTLS and signed OTA images.
 
 esphome:
   name: amazon-basics-local
   friendly_name: Amazon Basics Local Device
 
 esp32:
-  board: esp32dev
+  board: esp32-pico-d4
   framework:
     type: esp-idf
 
@@ -27,8 +28,9 @@ wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
 
-# Default RGBWW LEDC PWM outputs for ESP32-PICO-V3-ZERO / ESP32-C3 ACK Smart Bulb
-# (Adjust GPIO numbers if your board revision uses an I2C/SM2135E or BP5758D LED driver)
+# ---------------------------------------------------------------------------
+# Option A (Default): 5-Channel LEDC PWM Driver (ESP32-PICO-V3-ZERO A19/BR30)
+# ---------------------------------------------------------------------------
 output:
   - platform: ledc
     id: out_red
@@ -51,15 +53,53 @@ output:
     pin: GPIO21
     frequency: 1000 Hz
 
+# ---------------------------------------------------------------------------
+# Option B (Uncomment if your board uses a BP5758D 5-ch I2C Constant-Current Driver)
+# ---------------------------------------------------------------------------
+# bp5758d:
+#   data_pin: GPIO21
+#   clock_pin: GPIO22
+# output:
+#   - platform: bp5758d
+#     id: out_red
+#     channel: 1
+#     current: 15
+#   - platform: bp5758d
+#     id: out_green
+#     channel: 2
+#     current: 15
+#   - platform: bp5758d
+#     id: out_blue
+#     channel: 3
+#     current: 15
+#   - platform: bp5758d
+#     id: out_warm_white
+#     channel: 4
+#     current: 35
+#   - platform: bp5758d
+#     id: out_cool_white
+#     channel: 5
+#     current: 35
+
+# ---------------------------------------------------------------------------
+# Option C (Uncomment if your board uses an SM2235EGH / SM2135EH 5-ch I2C Driver)
+# ---------------------------------------------------------------------------
+# sm2235:
+#   data_pin: GPIO21
+#   clock_pin: GPIO22
+#   rgb_current: 16mA
+#   cw_current: 35mA
+
 light:
   - platform: rgbww
+    id: amazon_bulb_light
     name: "Amazon Basics Smart Bulb"
     red: out_red
     green: out_green
     blue: out_blue
     warm_white: out_warm_white
     cool_white: out_cool_white
-    warm_white_color_temperature: 2700 K
-    cool_white_color_temperature: 6500 K
+    warm_white_color_temperature: 2200 K
+    cool_white_color_temperature: 7000 K
     color_interlock: true
     restore_mode: ALWAYS_ON

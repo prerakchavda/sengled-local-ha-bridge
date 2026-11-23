@@ -31,6 +31,10 @@ options:
   bridge_prefix: "sengled_bridge"
   log_level: "info"
   ble_bulbs: []
+  ack_lights: []
+  alexa_cookie: ""
+  alexa_domain: "amazon.com"
+  echo_entity: "media_player.echo_dot"
 schema:
   advertise_ip: str
   http_port: port
@@ -44,3 +48,9 @@ schema:
   log_level: list(debug|info|warning|error)
   ble_bulbs:
     - str?
+  ack_lights:
+    - str?
+  alexa_cookie: password?
+  alexa_domain: str?
+  echo_entity: str?
+

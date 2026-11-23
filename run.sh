@@ -18,6 +18,9 @@ if [ -f "$OPTIONS_JSON" ]; then
   DISCOVERY_PREFIX="$(jq -r '.discovery_prefix // "homeassistant"' "$OPTIONS_JSON")"
   BRIDGE_PREFIX="$(jq -r '.bridge_prefix // "sengled_bridge"' "$OPTIONS_JSON")"
   LOG_LEVEL="$(jq -r '.log_level // "info"' "$OPTIONS_JSON")"
+  ALEXA_COOKIE="$(jq -r '.alexa_cookie // ""' "$OPTIONS_JSON")"
+  ALEXA_DOMAIN="$(jq -r '.alexa_domain // "amazon.com"' "$OPTIONS_JSON")"
+  ECHO_ENTITY="$(jq -r '.echo_entity // "media_player.echo_dot"' "$OPTIONS_JSON")"
 else
   ADVERTISE_IP="${ADVERTISE_IP:-127.0.0.1}"
   HTTP_PORT="${HTTP_PORT:-8080}"
@@ -29,6 +32,19 @@ else
   DISCOVERY_PREFIX="${DISCOVERY_PREFIX:-homeassistant}"
   BRIDGE_PREFIX="${BRIDGE_PREFIX:-sengled_bridge}"
   LOG_LEVEL="${LOG_LEVEL:-info}"
+  ALEXA_COOKIE="${ALEXA_COOKIE:-}"
+  ALEXA_DOMAIN="${ALEXA_DOMAIN:-amazon.com}"
+  ECHO_ENTITY="${ECHO_ENTITY:-media_player.echo_dot}"
+fi
+
+EXTRA_ARGS=()
+if [ -f "$OPTIONS_JSON" ]; then
+  while IFS= read -r ble; do
+    [ -n "$ble" ] && EXTRA_ARGS+=(--ble-bulb "$ble")
+  done < <(jq -r '.ble_bulbs[]? // empty' "$OPTIONS_JSON")
+  while IFS= read -r ack; do
+    [ -n "$ack" ] && EXTRA_ARGS+=(--ack-light "$ack")
+  done < <(jq -r '.ack_lights[]? // empty' "$OPTIONS_JSON")
 fi
 
 echo "[sengled-bridge] Generating/verifying self-signed TLS certificates in ${CERT_DIR}..."
@@ -47,4 +63,9 @@ exec sengled-bridge serve \
   --bridge-prefix "$BRIDGE_PREFIX" \
   --cert-dir "$CERT_DIR" \
   --data-dir "$DATA_DIR" \
-  --log-level "$LOG_LEVEL"
+  --alexa-cookie "$ALEXA_COOKIE" \
+  --alexa-domain "$ALEXA_DOMAIN" \
+  --echo-entity "$ECHO_ENTITY" \
+  --log-level "$LOG_LEVEL" \
+  "${EXTRA_ARGS[@]}"
+

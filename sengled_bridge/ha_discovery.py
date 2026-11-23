@@ -11,9 +11,11 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from sengled_bridge.alexa_ack_bridge import AlexaACKLightState
 from sengled_bridge.ble_controller import SengledBLEBulbState
 from sengled_bridge.models import (
     ColorCapability,
+    RadioProtocol,
     SengledModelSpec,
     identify_device_by_model_or_fcc,
     identify_from_status_attributes,
@@ -55,6 +57,7 @@ def get_ha_topics(
         "command_topic": f"{bridge_prefix}/light/{slug}/set",
         "availability_topic": f"{bridge_prefix}/light/{slug}/availability",
         "bridge_availability_topic": f"{bridge_prefix}/bridge/status",
+        "alexa_ack_command_topic": f"{bridge_prefix}/alexa_ack/{slug}/command",
     }
 
 
@@ -111,12 +114,13 @@ def build_ha_light_discovery_payload(
     chipset: str = "",
     friendly_name: Optional[str] = None,
     transport: str = "Wi-Fi",
+    manufacturer: Optional[str] = None,
     discovery_prefix: str = "homeassistant",
     bridge_prefix: str = "sengled_bridge",
 ) -> Dict[str, Any]:
     """
-    Build a Home Assistant MQTT Discovery configuration dictionary for a Sengled bulb
-    (`homeassistant/light/sengled_{mac_slug}/config`).
+    Build a Home Assistant MQTT Discovery configuration dictionary for a Sengled or
+    Amazon Basics 'Works with Alexa Only' (ACK) bulb (`homeassistant/light/sengled_{mac_slug}/config`).
     """
     norm_mac = normalize_mac(mac)
     slug = mac_to_slug(norm_mac)
@@ -130,9 +134,13 @@ def build_ha_light_discovery_payload(
         support_attributes=support_attributes,
     )
 
-    display_model = model_code or (spec.model if spec else f"Sengled {transport} Bulb")
+    is_ack = (spec is not None and spec.protocol == RadioProtocol.WIFI_ALEXA_ACK) or (
+        "ACK" in transport.upper()
+    )
+    resolved_mfr = manufacturer or ("Amazon Basics" if is_ack else "Sengled")
+    display_model = model_code or (spec.model if spec else f"{resolved_mfr} {transport} Bulb")
     name = friendly_name or (
-        f"{spec.name} ({norm_mac[-5:]})" if spec else f"Sengled {display_model} {norm_mac[-5:]}"
+        f"{spec.name} ({norm_mac[-5:]})" if spec else f"{resolved_mfr} {display_model} {norm_mac[-5:]}"
     )
 
     payload: Dict[str, Any] = {
@@ -152,10 +160,10 @@ def build_ha_light_discovery_payload(
         "device": {
             "identifiers": [f"sengled_{slug}"],
             "connections": [["mac", norm_mac]],
-            "manufacturer": "Sengled",
+            "manufacturer": resolved_mfr,
             "model": f"{display_model} ({spec.module_id})" if spec else display_model,
             "name": name,
-            "sw_version": firmware_version or "Stock Local",
+            "sw_version": firmware_version or ("ACK Bridge" if is_ack else "Stock Local"),
             "hw_version": chipset or (spec.chipset if spec else transport),
         },
     }
@@ -178,11 +186,11 @@ def build_ha_light_discovery_payload(
 
 
 def build_ha_light_state_payload(
-    bulb: Union[SengledWiFiBulbState, SengledBLEBulbState]
+    bulb: Union[SengledWiFiBulbState, SengledBLEBulbState, AlexaACKLightState]
 ) -> Dict[str, Any]:
     """
-    Build the Home Assistant MQTT JSON Light state dictionary from a Wi-Fi or BLE
-    bulb state object.
+    Build the Home Assistant MQTT JSON Light state dictionary from a Wi-Fi, BLE,
+    or Amazon 'Works with Alexa Only' (ACK) bulb state object.
     """
     if isinstance(bulb, SengledWiFiBulbState):
         model_code = bulb.type_code
