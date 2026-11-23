@@ -1,0 +1,46 @@
+name: "Sengled Local Home Assistant Bridge"
+description: "100% local, cloud-free bridge & provisioning server for Sengled Wi-Fi and Bluetooth (BLE) smart bulbs"
+version: "1.0.0"
+slug: "sengled_local_ha_bridge"
+init: false
+arch:
+  - amd64
+  - aarch64
+startup: services
+boot: auto
+host_network: false
+bluetooth: true
+ports:
+  8080/tcp: 8080
+  8883/tcp: 8883
+  9080/udp: 9080
+ports_description:
+  8080/tcp: "Sengled HTTP Cloud Discovery (/accessCloud.json, /bimqtt) & Web Provisioning UI"
+  8883/tcp: "Sengled Bulb TLS MQTT Listener"
+  9080/udp: "Sengled Local UDP Discovery & Direct Control"
+webui: "http://[HOST]:[PORT:8080]/"
+options:
+  advertise_ip: "192.168.1.100"
+  http_port: 8080
+  bulb_tls_port: 8883
+  mqtt_host: "core-mosquitto"
+  mqtt_port: 1883
+  mqtt_username: ""
+  mqtt_password: ""
+  discovery_prefix: "homeassistant"
+  bridge_prefix: "sengled_bridge"
+  log_level: "info"
+  ble_bulbs: []
+schema:
+  advertise_ip: str
+  http_port: port
+  bulb_tls_port: port
+  mqtt_host: str
+  mqtt_port: port
+  mqtt_username: str?
+  mqtt_password: password?
+  discovery_prefix: str
+  bridge_prefix: str
+  log_level: list(debug|info|warning|error)
+  ble_bulbs:
+    - str?
